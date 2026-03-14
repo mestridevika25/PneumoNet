@@ -1,0 +1,24 @@
+.dashboard-shell {
+  min-height: 100vh;
+  background: #fff5f2;
+}
+
+.section-title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #333333;
+}
+
+.section-subtitle {
+  color: #6b6b6b;
+  font-size: 0.9rem;
+  margin-top: 0.25rem;
+}
+
+.card-standard {
+  background: #ffffff;
+  border: 1px solid #eaeaea;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  padding: 20px;
+}

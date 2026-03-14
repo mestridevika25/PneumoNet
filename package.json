@@ -1,0 +1,10 @@
+{
+  "name": "gravity-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix pneumonia-detector-system/frontend run dev",
+    "build": "npm --prefix pneumonia-detector-system/frontend run build",
+    "preview": "npm --prefix pneumonia-detector-system/frontend run preview",
+    "lint": "npm --prefix pneumonia-detector-system/frontend run lint"
+  }
+}
