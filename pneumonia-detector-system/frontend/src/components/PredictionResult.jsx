@@ -3,7 +3,17 @@ import { motion } from 'framer-motion';
 export default function PredictionResult({ prediction, confidence, imageUrl, heartRate, spo2 }) {
   if (!prediction) return null;
 
-  const isPneumonia = prediction.toLowerCase() === 'pneumonia';
+  const normalizedPrediction = String(prediction).toLowerCase();
+  const isPneumonia = normalizedPrediction === 'pneumonia' || normalizedPrediction === 'pneumonia detected';
+  const predictionColorClass = isPneumonia
+    ? 'text-rose-400'
+    : normalizedPrediction === 'healthy'
+      ? 'text-emerald-400'
+      : normalizedPrediction === 'possible early infection'
+        ? 'text-orange-400'
+        : normalizedPrediction === 'monitor patient'
+          ? 'text-amber-400'
+          : 'text-[--color-text-primary]';
   const pct = (Number(confidence) * 100).toFixed(1);
 
   return (
@@ -26,7 +36,7 @@ export default function PredictionResult({ prediction, confidence, imageUrl, hea
         <div className="flex-1 flex flex-col justify-center gap-4">
           <div>
             <p className="text-xs text-[--color-text-secondary] mb-1">Prediction</p>
-            <p className={`text-2xl font-bold ${isPneumonia ? 'text-rose-400' : 'text-emerald-400'}`}>
+            <p className={`text-2xl font-bold ${predictionColorClass}`}>
               {prediction}
             </p>
           </div>

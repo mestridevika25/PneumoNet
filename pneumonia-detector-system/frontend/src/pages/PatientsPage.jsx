@@ -5,6 +5,7 @@ import {
   deletePatient,
   deletePredictionsByPatient,
   onPatientsSnapshot,
+  onPredictionsSnapshot,
 } from '../services/firebaseService';
 
 export default function PatientsPage() {
@@ -18,12 +19,35 @@ export default function PatientsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [deletingPatientId, setDeletingPatientId] = useState('');
   const [error, setError] = useState('');
+  const [latestPredictionByPatient, setLatestPredictionByPatient] = useState({});
 
   useEffect(() => {
     setLoading(true);
     const unsubscribe = onPatientsSnapshot((rows) => {
       setPatients(rows);
       setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onPredictionsSnapshot((rows) => {
+      const latestByPatient = rows.reduce((acc, prediction) => {
+        const patientId = prediction.patientId ?? prediction.patient_id;
+        if (!patientId) return acc;
+
+        const timestamp = Number(prediction.timestamp ?? 0);
+        const existing = acc[patientId];
+        const existingTs = Number(existing?.timestamp ?? 0);
+
+        if (!existing || timestamp >= existingTs) {
+          acc[patientId] = prediction;
+        }
+        return acc;
+      }, {});
+
+      setLatestPredictionByPatient(latestByPatient);
     });
 
     return () => unsubscribe();
@@ -193,11 +217,21 @@ export default function PatientsPage() {
                     className={`border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer ${selectedPatientId === (p.patient_id || p.id) ? 'bg-white/[0.02]' : ''}`}
                     onClick={() => handleRowClick(p.patient_id || p.id)}
                   >
+                    {(() => {
+                      const patientId = p.patient_id || p.id;
+                      const latestPrediction = latestPredictionByPatient[patientId] || {};
+                      const hrValue = Number(latestPrediction.hr ?? latestPrediction.heart_rate ?? p.last_hr);
+                      const spo2Value = Number(latestPrediction.spo2 ?? p.last_spo2);
+                      const displayHr = Number.isFinite(hrValue) && hrValue > 0 ? hrValue : '—';
+                      const displaySpo2 = Number.isFinite(spo2Value) && spo2Value > 0 ? spo2Value : '—';
+
+                      return (
+                        <>
                     <td className="px-5 py-4 text-[--color-text-secondary] font-mono text-xs">{p.patient_id || p.id}</td>
                     <td className="px-5 py-4 text-[--color-text-primary] font-medium">{p.name}</td>
                     <td className="px-5 py-4 text-[--color-text-secondary]">{p.age}</td>
-                    <td className="px-5 py-4 text-[--color-text-secondary]">{p.last_hr ?? '—'}</td>
-                    <td className="px-5 py-4 text-[--color-text-secondary]">{p.last_spo2 ?? '—'}</td>
+                    <td className="px-5 py-4 text-[--color-text-secondary]">{displayHr}</td>
+                    <td className="px-5 py-4 text-[--color-text-secondary]">{displaySpo2}</td>
                     <td className="px-5 py-4 text-[--color-text-secondary]">
                       {p.last_prediction || '—'}
                     </td>
@@ -229,6 +263,9 @@ export default function PatientsPage() {
                         {deletingPatientId === (p.patient_id || p.id) ? 'Deleting...' : 'Delete'}
                       </button>
                     </td>
+                        </>
+                      );
+                    })()}
                   </tr>
                 ))
               )}

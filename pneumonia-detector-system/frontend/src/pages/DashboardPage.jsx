@@ -4,7 +4,13 @@ import { HiOutlineHeart, HiOutlineStatusOnline, HiOutlineShieldCheck, HiOutlineC
 import VitalsCard from '../components/VitalsCard';
 import VitalsChart from '../components/VitalsChart';
 import DeviceStatus from '../components/DeviceStatus';
-import { onVitalsUpdate, onVitalsLog, onDeviceStatus, onLatestPrediction } from '../services/firebaseService';
+import {
+  onVitalsUpdate,
+  onVitalsLog,
+  onDeviceStatus,
+  onLatestPrediction,
+  listenToSensorData,
+} from '../services/firebaseService';
 
 const DEVICE_ID = 'esp8266-001';
 
@@ -14,10 +20,19 @@ const formatMetric = (value, digits = 0) => {
 };
 
 export default function DashboardPage() {
-  const [vitals, setVitals] = useState({ heartRate: null, spo2: null });
-  const [vitalsLog, setVitalsLog] = useState([]);
-  const [deviceInfo, setDeviceInfo] = useState(null);
+  const [, setVitals] = useState({ heartRate: null, spo2: null });
+  const [, setVitalsLog] = useState([]);
+  const [, setDeviceInfo] = useState(null);
   const [latestPrediction, setLatestPrediction] = useState(null);
+  const [sensor, setSensor] = useState({
+    heartRate: 0,
+    spO2: 0,
+    fingerDetected: false,
+    status: 'no_finger',
+    timestamp: 0,
+  });
+  const [hrHistory, setHrHistory] = useState([]);
+  const [spo2History, setSpo2History] = useState([]);
 
   useEffect(() => {
     const unsubVitals = onVitalsUpdate(DEVICE_ID, setVitals);
@@ -33,9 +48,43 @@ export default function DashboardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = listenToSensorData((data) => {
+      setSensor(data);
+
+      if (data.fingerDetected && data.heartRate > 0) {
+        const time = new Date().toLocaleTimeString();
+
+        setHrHistory((prev) => [
+          ...prev.slice(-19),
+          { time, value: data.heartRate },
+        ]);
+
+        setSpo2History((prev) => [
+          ...prev.slice(-19),
+          { time, value: data.spO2 },
+        ]);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   const cards = [
-    { title: 'Heart Rate', value: formatMetric(vitals?.heart_rate ?? vitals?.heartRate), unit: 'bpm', icon: HiOutlineHeart, color: 'rose' },
-    { title: 'SpO2 Level', value: formatMetric(vitals?.spo2), unit: '%', icon: HiOutlineStatusOnline, color: 'cyan' },
+    {
+      title: 'Heart Rate',
+      value: sensor.fingerDetected ? formatMetric(sensor.heartRate, 1) : '—',
+      unit: 'bpm',
+      icon: HiOutlineHeart,
+      color: 'rose',
+    },
+    {
+      title: 'SpO2 Level',
+      value: sensor.fingerDetected ? formatMetric(sensor.spO2, 1) : '—',
+      unit: '%',
+      icon: HiOutlineStatusOnline,
+      color: 'cyan',
+    },
     {
       title: 'Last Prediction',
       value: latestPrediction?.prediction || '—',
@@ -43,7 +92,12 @@ export default function DashboardPage() {
       color: 'purple',
       subtitle: latestPrediction ? `${(Number(latestPrediction.confidence) * 100).toFixed(0)}% confidence` : '',
     },
-    { title: 'Device Status', value: String(deviceInfo?.status).toLowerCase() === 'connected' ? 'Connected' : 'Offline', icon: HiOutlineChip, color: 'emerald' },
+    {
+      title: 'Device Status',
+      value: sensor.fingerDetected ? 'Online' : 'Offline',
+      icon: HiOutlineChip,
+      color: sensor.fingerDetected ? 'emerald' : 'rose',
+    },
   ];
 
   return (
@@ -70,15 +124,15 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
         <VitalsChart
           title="Heart Rate Over Time"
-          data={vitalsLog}
-          dataKey="heart_rate"
+          data={hrHistory}
+          dataKey="value"
           color="#ff8a65"
           unit=" bpm"
         />
         <VitalsChart
           title="SpO2 Over Time"
-          data={vitalsLog}
-          dataKey="spo2"
+          data={spo2History}
+          dataKey="value"
           color="#ff6b4a"
           unit="%"
         />
@@ -86,8 +140,13 @@ export default function DashboardPage() {
 
       {/* Device Status */}
       <DeviceStatus
-        status={deviceInfo?.status}
-        lastActive={deviceInfo?.last_active}
+        status={sensor.fingerDetected ? 'online' : 'offline'}
+        lastActive={sensor.timestamp}
+        lastReading={
+          sensor.fingerDetected
+            ? `${formatMetric(sensor.heartRate, 1)} bpm / ${formatMetric(sensor.spO2, 1)}%`
+            : 'N/A'
+        }
       />
     </div>
   );

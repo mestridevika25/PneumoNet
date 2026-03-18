@@ -93,6 +93,19 @@ def decode_prediction(raw_output: np.ndarray) -> tuple[str, float]:
     raise ValueError(f"Unexpected model output shape: {np.array(raw_output).shape}")
 
 
+def adjust_with_vitals(confidence: float, heart_rate: float, spo2: float) -> float:
+    risk = float(confidence)
+    if spo2 > 0 and spo2 < 94:
+        risk += 0.15
+    if spo2 > 0 and spo2 < 90:
+        risk += 0.10
+    if heart_rate > 0 and heart_rate > 100:
+        risk += 0.05
+    if heart_rate > 0 and heart_rate > 120:
+        risk += 0.05
+    return min(risk, 0.99)
+
+
 @app.on_event("startup")
 def startup_event():
     load_ml_model()
@@ -106,8 +119,8 @@ def health_check():
 @app.post("/predict")
 async def predict(
     image: UploadFile = File(...),
-    heart_rate: float = Form(...),
-    spo2: float = Form(...),
+    heartRate: float = Form(0),
+    spO2: float = Form(0),
     patient_id: str = Form(...),
 ):
     if image is None:
@@ -116,8 +129,8 @@ async def predict(
     if not patient_id:
         raise HTTPException(status_code=400, detail='Missing patient_id field.')
 
-    if not np.isfinite(heart_rate) or not np.isfinite(spo2):
-        raise HTTPException(status_code=400, detail='heart_rate and spo2 must be valid numbers.')
+    if not np.isfinite(heartRate) or not np.isfinite(spO2):
+        raise HTTPException(status_code=400, detail='heartRate and spO2 must be valid numbers.')
 
     if model is None:
         raise HTTPException(
@@ -133,10 +146,13 @@ async def predict(
         processed = preprocess_image(file_bytes)
         raw_pred = model.predict(processed, verbose=0)
         label, confidence = decode_prediction(raw_pred)
+        original_confidence = float(confidence)
+        adjusted_confidence = adjust_with_vitals(original_confidence, heartRate, spO2)
+        final_prediction = "Pneumonia" if adjusted_confidence > 0.5 else "Normal"
 
         return {
-            "prediction": label,
-            "confidence": round(float(confidence), 4),
+            "prediction": final_prediction,
+            "confidence": round(float(adjusted_confidence), 4),
         }
     except HTTPException:
         raise

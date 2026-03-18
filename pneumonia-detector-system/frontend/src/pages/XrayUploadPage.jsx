@@ -3,14 +3,13 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { HiOutlineUpload, HiOutlinePhotograph } from 'react-icons/hi';
 import PredictionResult from '../components/PredictionResult';
+import { predictXray } from '../services/mlService';
 import {
   addPrediction,
   getPatients,
-  getCurrentVitals,
+  listenToSensorData,
   updatePatient,
 } from '../services/firebaseService';
-
-const ML_API_URL = 'http://localhost:8000/predict';
 
 const fileToDataUrl = (inputFile) =>
   new Promise((resolve, reject) => {
@@ -28,17 +27,23 @@ export default function XrayUploadPage() {
   const [result, setResult] = useState(null);
   const [patients, setPatients] = useState([]);
   const [selectedPatientId, setSelectedPatientId] = useState('');
-  const [currentVitals, setCurrentVitals] = useState({ heartRate: null, spo2: null });
+  const [liveHR, setLiveHR] = useState(0);
+  const [liveSpO2, setLiveSpO2] = useState(0);
+  const [liveFinger, setLiveFinger] = useState(false);
+  const [capturedHR, setCapturedHR] = useState(null);
+  const [capturedSpO2, setCapturedSpO2] = useState(null);
+  const [captured, setCaptured] = useState(false);
+  const capturedHRRef = useRef(null);
+  const capturedSpO2Ref = useRef(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const submitInFlightRef = useRef(false);
 
   useEffect(() => {
-    Promise.all([getPatients(), getCurrentVitals()])
-      .then(([rows, vitals]) => {
+    Promise.all([getPatients()])
+      .then(([rows]) => {
         setPatients(rows);
-        setCurrentVitals(vitals);
         const patientFromState = location.state?.patientId;
         const patientFromQuery = searchParams.get('patient');
         if (patientFromState) {
@@ -54,13 +59,17 @@ export default function XrayUploadPage() {
       });
   }, [location.state, searchParams]);
 
-  const selectedPatient = patients.find((p) => (p.patient_id || p.id) === selectedPatientId) || null;
+  useEffect(() => {
+    const unsubscribe = listenToSensorData((data) => {
+      setLiveHR(Number(data.heartRate) || 0);
+      setLiveSpO2(Number(data.spO2) || 0);
+      setLiveFinger(Boolean(data.fingerDetected));
+    });
 
-  const refreshVitals = async () => {
-    const vitals = await getCurrentVitals();
-    setCurrentVitals(vitals);
-    return vitals;
-  };
+    return () => unsubscribe();
+  }, []);
+
+  const selectedPatient = patients.find((p) => (p.patient_id || p.id) === selectedPatientId) || null;
 
   const handleFile = (f) => {
     if (!f) return;
@@ -71,6 +80,9 @@ export default function XrayUploadPage() {
     setFile(f);
     setPreview(URL.createObjectURL(f));
     setResult(null);
+    setCaptured(false);
+    setCapturedHR(null);
+    setCapturedSpO2(null);
     setError('');
   };
 
@@ -88,37 +100,9 @@ export default function XrayUploadPage() {
     setLoading(true);
     setError('');
     try {
-      const vitals = await refreshVitals();
-      const heartRate = Number(vitals?.heartRate);
-      const spo2 = Number(vitals?.spo2);
-
-      if (!Number.isFinite(heartRate) || !Number.isFinite(spo2)) {
-        throw new Error('Current HR and SpO2 are unavailable from Firebase. Please check the device stream.');
-      }
-
-      const formData = new FormData();
-      formData.append('image', file);
-      formData.append('heart_rate', String(heartRate));
-      formData.append('spo2', String(spo2));
-      formData.append('patient_id', String(selectedPatientId));
-
-      const response = await fetch(ML_API_URL, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        let detail = 'Prediction failed. ML API may be offline.';
-        try {
-          const body = await response.json();
-          detail = body?.detail || detail;
-        } catch {
-          // Keep generic detail when response body is not JSON.
-        }
-        throw new Error(detail);
-      }
-
-      const prediction = await response.json();
+      const heartRate = Number(capturedHRRef.current ?? capturedHR ?? 0);
+      const spo2 = Number(capturedSpO2Ref.current ?? capturedSpO2 ?? 0);
+      const prediction = await predictXray(file, heartRate, spo2);
       const predictionTimestamp = Date.now();
 
       const imageUrl = await fileToDataUrl(file);
@@ -126,13 +110,15 @@ export default function XrayUploadPage() {
       await updatePatient(selectedPatientId, {
         last_hr: heartRate,
         last_spo2: spo2,
-        last_prediction: prediction.prediction,
+        last_prediction: prediction.final_result,
         xray_image: imageUrl,
       });
 
       try {
         await addPrediction({
-          result: prediction.prediction,
+          result: prediction.final_result,
+          finalResult: prediction.final_result,
+          xrayResult: prediction.xray_result,
           confidence: prediction.confidence,
           xrayUrl: imageUrl,
           patientId: selectedPatientId,
@@ -148,8 +134,8 @@ export default function XrayUploadPage() {
       setResult({
         ...prediction,
         imageUrl: preview,
-        heartRate,
-        spo2,
+        heart_rate: prediction.heart_rate,
+        spo2: prediction.spo2,
       });
     } catch (err) {
       setError(err.message || 'Prediction failed. ML API may be offline.');
@@ -194,43 +180,83 @@ export default function XrayUploadPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
           <div className="rounded-xl border border-white/10 p-3">
             <p className="text-xs text-[--color-text-secondary]">Heart Rate (from Firebase)</p>
-            <p className="text-lg font-semibold text-[--color-text-primary]">{currentVitals.heartRate ?? '—'} bpm</p>
+            <p className="text-lg font-semibold text-[--color-text-primary]">{liveFinger && liveHR > 0 ? liveHR.toFixed(1) : '—'} bpm</p>
           </div>
           <div className="rounded-xl border border-white/10 p-3">
             <p className="text-xs text-[--color-text-secondary]">SpO2 (from Firebase)</p>
-            <p className="text-lg font-semibold text-[--color-text-primary]">{currentVitals.spo2 ?? '—'}%</p>
+            <p className="text-lg font-semibold text-[--color-text-primary]">{liveFinger && liveSpO2 > 0 ? liveSpO2.toFixed(1) : '—'}%</p>
           </div>
+        </div>
+
+        <div className="mt-4">
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => {
+              if (captured) {
+                setCaptured(false);
+                setFile(null);
+                setPreview(null);
+                capturedHRRef.current = null;
+                capturedSpO2Ref.current = null;
+                return;
+              }
+              setCapturedHR(liveHR);
+              setCapturedSpO2(liveSpO2);
+              setCaptured(true);
+              capturedHRRef.current = liveHR;
+              capturedSpO2Ref.current = liveSpO2;
+            }}
+            disabled={!liveFinger || liveHR === 0}
+            title={!liveFinger || liveHR === 0 ? 'Place finger on sensor to capture' : ''}
+          >
+            {captured ? '✓ Captured — Re-capture' : '📌 Capture Reading'}
+          </button>
+
+          {(!liveFinger || liveHR === 0) && (
+            <p className="text-xs text-[--color-text-secondary] mt-2">Place finger on sensor to capture</p>
+          )}
+
+          {captured && capturedHR !== null && capturedSpO2 !== null && (
+            <p className="text-xs text-emerald-400 mt-2">
+              ✓ Vitals captured: HR {Number(capturedHR).toFixed(1)} bpm | SpO2 {Number(capturedSpO2).toFixed(1)} %
+            </p>
+          )}
         </div>
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-        onDragLeave={() => setDragActive(false)}
-        onDrop={onDrop}
-        className={`glass-card p-10 text-center cursor-pointer transition-all
+      {captured && capturedHRRef.current !== null ? (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={onDrop}
+          className={`glass-card p-10 text-center cursor-pointer transition-all
           ${dragActive ? 'border-[--color-primary] bg-cyan-500/5 glow-cyan' : 'border-dashed border-white/10'}
           border-2 rounded-2xl`}
-        onClick={() => document.getElementById('xray-file-input').click()}
-      >
-        {preview ? (
-          <img src={preview} alt="Preview" className="mx-auto max-h-64 rounded-xl border border-white/10" />
-        ) : (
-          <div className="space-y-3">
-            <HiOutlinePhotograph className="w-12 h-12 mx-auto text-[--color-text-secondary]" />
-            <p className="text-[--color-text-secondary]">Drag &amp; drop an X-ray image or click to browse</p>
-            <p className="text-xs text-[--color-text-secondary]/60">PNG, JPG, JPEG supported</p>
-          </div>
-        )}
-        <input
-          id="xray-file-input"
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => handleFile(e.target.files[0])}
-        />
-      </motion.div>
+          onClick={() => document.getElementById('xray-file-input').click()}
+        >
+          {preview ? (
+            <img src={preview} alt="Preview" className="mx-auto max-h-64 rounded-xl border border-white/10" />
+          ) : (
+            <div className="space-y-3">
+              <HiOutlinePhotograph className="w-12 h-12 mx-auto text-[--color-text-secondary]" />
+              <p className="text-[--color-text-secondary]">Drag &amp; drop an X-ray image or click to browse</p>
+              <p className="text-xs text-[--color-text-secondary]/60">PNG, JPG, JPEG supported</p>
+            </div>
+          )}
+          <input
+            id="xray-file-input"
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => handleFile(e.target.files[0])}
+          />
+        </motion.div>
+      ) : (
+        <p className="text-sm text-[--color-text-secondary]">Step 1: Capture vitals above before uploading X-ray</p>
+      )}
 
       {error && (
         <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
@@ -239,38 +265,44 @@ export default function XrayUploadPage() {
       )}
 
       {file && !result && (
-        <button
-          id="predict-btn"
-          onClick={handleSubmit}
-          disabled={loading || !selectedPatientId}
-          className="btn-primary w-full flex items-center justify-center gap-2"
-        >
-          {loading ? (
-            <>
-              <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Analyzing...
-            </>
-          ) : (
-            <>
-              <HiOutlineUpload className="w-5 h-5" />
-              Run AI Prediction
-            </>
+        <>
+          <button
+            id="predict-btn"
+            onClick={handleSubmit}
+            disabled={loading || !selectedPatientId}
+            className="btn-primary w-full flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <>
+                <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Analyzing...
+              </>
+            ) : (
+              <>
+                <HiOutlineUpload className="w-5 h-5" />
+                Run AI Prediction
+              </>
+            )}
+          </button>
+
+          {capturedHR === null && (
+            <p className="text-xs text-[--color-text-secondary] mt-2">Capture vitals before running prediction</p>
           )}
-        </button>
+        </>
       )}
 
       {result && (
         <>
           <PredictionResult
-            prediction={result.prediction}
+            prediction={result.final_result}
             confidence={result.confidence}
             imageUrl={result.imageUrl}
-            heartRate={result.heartRate}
+            heartRate={result.heart_rate}
             spo2={result.spo2}
           />
 
           <div className="glass-card p-4 text-sm text-[--color-text-primary]">
-            <p>Prediction: {result.prediction}</p>
+            <p>Prediction: {result.final_result}</p>
             <p>Confidence: {Math.round(Number(result.confidence) * 100)}%</p>
           </div>
         </>

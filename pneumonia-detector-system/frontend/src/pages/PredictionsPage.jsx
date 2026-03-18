@@ -32,7 +32,7 @@ export default function PredictionsPage() {
           patientName: prediction.patientName
             ?? prediction.patient_name
             ?? (patientMap.get(prediction.patientId ?? prediction.patient_id) ?? ''),
-          result: prediction.result ?? prediction.prediction,
+          finalResult: prediction.finalResult ?? prediction.final_result ?? prediction.result ?? prediction.prediction,
           hr: prediction.hr ?? prediction.heart_rate,
           xrayUrl: prediction.xrayUrl ?? prediction.image_url ?? '',
           timestamp: Number(prediction.timestamp ?? 0),
@@ -78,8 +78,20 @@ export default function PredictionsPage() {
       ) : (
         <div className="space-y-0">
           {predictions.map((p) => {
-            const isPneumonia = p.result?.toLowerCase() === 'pneumonia';
+            const predictionText = p.finalResult || p.prediction || '—';
+            const normalizedResult = String(predictionText).toLowerCase();
+            const resultColorClass = normalizedResult === 'pneumonia detected' || normalizedResult === 'pneumonia'
+              ? 'text-rose-400'
+              : normalizedResult === 'healthy' || normalizedResult === 'normal'
+                ? 'text-emerald-400'
+                : normalizedResult === 'possible early infection'
+                  ? 'text-orange-400'
+                  : normalizedResult === 'monitor patient'
+                    ? 'text-amber-400'
+                    : 'text-[--color-text-primary]';
             const confidence = Number(p.confidence);
+            const hrValue = Number(p.hr);
+            const spo2Value = Number(p.spo2);
             return (
               <div key={`${p.patientId}-${p.timestamp ?? 0}`} className="glass-card p-5 mb-5">
                 <div className="flex flex-col lg:flex-row gap-4">
@@ -92,8 +104,8 @@ export default function PredictionsPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="rounded-xl border border-white/10 p-3">
                         <p className="text-xs text-[--color-text-secondary]">Prediction Result</p>
-                        <p className={`font-semibold ${isPneumonia ? 'text-rose-400' : 'text-emerald-400'}`}>
-                          {p.result || '—'}
+                        <p className={`font-semibold ${resultColorClass}`}>
+                          {predictionText}
                         </p>
                       </div>
                       <div className="rounded-xl border border-white/10 p-3">
@@ -107,11 +119,15 @@ export default function PredictionsPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="rounded-xl border border-white/10 p-3">
                         <p className="text-xs text-[--color-text-secondary]">Heart Rate at Prediction</p>
-                        <p className="font-semibold text-[--color-text-primary]">{p.hr ?? '—'} bpm</p>
+                        <p className="font-semibold text-[--color-text-primary]">
+                          {Number.isFinite(hrValue) && hrValue > 0 ? `${hrValue} bpm` : '— bpm'}
+                        </p>
                       </div>
                       <div className="rounded-xl border border-white/10 p-3">
                         <p className="text-xs text-[--color-text-secondary]">SpO2 at Prediction</p>
-                        <p className="font-semibold text-[--color-text-primary]">{p.spo2 ?? '—'}%</p>
+                        <p className="font-semibold text-[--color-text-primary]">
+                          {Number.isFinite(spo2Value) && spo2Value > 0 ? `${spo2Value}%` : '—%'}
+                        </p>
                       </div>
                     </div>
                   </div>

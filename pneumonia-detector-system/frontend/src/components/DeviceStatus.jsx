@@ -7,10 +7,12 @@ const formatTimestamp = (value) => {
   return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleString();
 };
 
-export default function DeviceStatus({ status, lastActive }) {
-  const isConnected = String(status).toLowerCase() === 'connected';
+export default function DeviceStatus({ status, lastActive, lastReading }) {
+  const normalizedStatus = String(status).toLowerCase();
+  const isConnected = normalizedStatus === 'connected' || normalizedStatus === 'online';
 
   const formatted = formatTimestamp(lastActive);
+  const readingText = lastReading ?? formatted;
 
   return (
     <motion.div
@@ -27,14 +29,14 @@ export default function DeviceStatus({ status, lastActive }) {
         <p className="text-sm font-semibold text-[--color-text-primary]">
           ESP8266:&nbsp;
           <span className={isConnected ? 'text-emerald-600' : 'text-red-600'}>
-            {isConnected ? 'Connected' : 'Offline'}
+            {isConnected ? 'Online' : 'Offline'}
           </span>
         </p>
         <p className="text-xs text-[--color-text-secondary]">
           Sensor: MAX30100
         </p>
         <div className="mt-2 text-xs text-[--color-text-secondary]">
-          Last reading: <span className="text-[--color-text-primary]">{formatted}</span>
+          Last reading: <span className="text-[--color-text-primary]">{readingText}</span>
         </div>
       </div>
     </motion.div>

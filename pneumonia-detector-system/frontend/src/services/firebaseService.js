@@ -289,3 +289,22 @@ export const onLatestPrediction = (callback) => {
   });
 };
 
+export function listenToSensorData(onData) {
+  const sensorRef = rtdbRef(rtdb, '/sensor');
+
+  const unsubscribe = onValue(sensorRef, (snapshot) => {
+    const data = snapshot.val();
+    if (data) {
+      onData({
+        heartRate: data.heartRate ?? 0,
+        spO2: data.spO2 ?? 0,
+        fingerDetected: data.fingerDetected ?? false,
+        status: data.status ?? 'no_finger',
+        timestamp: data.timestamp ?? 0,
+      });
+    }
+  });
+
+  return unsubscribe;
+}
+

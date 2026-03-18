@@ -22,3 +22,20 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Environment variables - NEVER push these
+.env
+*.env
+
+# Python virtual environment
+.venv/
+venv/
+
+# Node modules
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Model file (too large for git)
+*.h5

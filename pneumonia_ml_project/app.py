@@ -5,7 +5,7 @@ import numpy as np
 import cv2
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["http://localhost:5173", "http://localhost:5174", "http://127.0.0.1:5173", "http://127.0.0.1:5174"])
 
 # load trained model
 model = tf.keras.models.load_model("models/pneumonia_densenet_model.h5")

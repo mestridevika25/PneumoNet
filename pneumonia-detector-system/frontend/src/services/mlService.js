@@ -2,19 +2,15 @@ import axios from 'axios';
 
 const ML_API_URL = import.meta.env.VITE_ML_API_URL || 'http://localhost:8000';
 
-export const predictXray = async ({ file, patientId, heartRate, spo2 }) => {
+export const predictXray = async (imageFile, heartRate = 0, spO2 = 0) => {
   const formData = new FormData();
-  formData.append('image', file);
-  formData.append('patient_id', String(patientId ?? ''));
-  formData.append('heart_rate', String(heartRate ?? ''));
-  formData.append('spo2', String(spo2 ?? ''));
+  formData.append('image', imageFile);
+  formData.append('heart_rate', Math.round(heartRate || 0));
+  formData.append('spo2', Math.round(spO2 || 0));
 
-  const response = await axios.post(`${ML_API_URL}/predict`, formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 30000,
-  });
+  const response = await axios.post(`${ML_API_URL}/predict`, formData, { timeout: 30000 });
 
-  return response.data; // { prediction, confidence }
+  return response.data;
 };
 
 export const checkApiHealth = async () => {
